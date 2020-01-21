@@ -3,9 +3,11 @@
 
 use panic_halt as _;
 
-use stm32f0xx_hal::{prelude::*, stm32, stm32::{interrupt, DMA1, ADC}};
+use stm32f0xx_hal::{prelude::*, stm32, stm32::interrupt};
+use stm32f0xx_hal::stm32::{ADC, DMA1, RCC};
 use stm32f0xx_hal::serial::Serial;
 use stm32f0xx_hal::timers::{Timer, Event};
+use cortex_m::peripheral::NVIC;
 use cortex_m_rt::entry;
 use core::fmt::Write;
 use stm32f0xx_hal::delay::Delay;
@@ -65,6 +67,104 @@ fn DMA1_CH1() {
     }
 }
 
+fn setup_adc(adc: ADC, dma: DMA1, nvic: &mut NVIC) {
+    let rcc = unsafe { &*RCC::ptr() };
+    rcc.apb2enr.modify(|_, w| w.adcen().set_bit());
+    rcc.ahbenr.modify(|_, w| w.dma1en().set_bit());
+
+    // Reset ADC
+    rcc.apb2rstr.modify(|_, w| w.adcrst().set_bit());
+    rcc.apb2rstr.modify(|_, w| w.adcrst().clear_bit());
+
+    let adc_dr_addr = &adc.dr as *const _ as usize;
+    let dma_buf_addr = unsafe { ADC_DMA_BUF.as_ptr() as usize };
+    let dma_buf_count = unsafe { ADC_DMA_BUF.len() };
+
+    let ch = &dma.ch1;
+    // deinit
+    ch.cr.modify(|_, w| w.en().clear_bit());
+    ch.cr.write_with_zero(|w| w);
+    ch.ndtr.write_with_zero(|w| w);
+    ch.par.write_with_zero(|w| w);
+    ch.mar.write_with_zero(|w| w);
+    dma.ifcr.write_with_zero(|w| {
+        w.cteif1().set_bit();
+        w.chtif1().set_bit();
+        w.ctcif1().set_bit();
+        w.cgif1().set_bit();
+        w
+    });
+
+    ch.cr.write_with_zero(|w| {
+        w.mem2mem().disabled();
+        w.pl().very_high();
+        w.msize().bits16();
+        w.psize().bits16();
+        w.minc().enabled();
+        w.pinc().disabled();
+        w.circ().enabled();
+        w.dir().from_peripheral();
+        w.teie().disabled();
+        w.htie().disabled();
+        w.tcie().disabled();
+        w.en().clear_bit();
+        w
+    });
+    ch.ndtr.write_with_zero(|w| w.ndt().bits(dma_buf_count as u16));
+    ch.par.write_with_zero(|w| w.pa().bits(adc_dr_addr as u32));
+    ch.mar.write_with_zero(|w| w.ma().bits(dma_buf_addr as u32));
+    ch.cr.modify(|_, w| {
+        w.tcie().set_bit();  // Enable "transfer complete" interrupt
+        w.en().set_bit();  // Enable channel
+        w
+    });
+
+    // Select DMA circular mode
+    adc.cfgr1.modify(|_, w| w.dmacfg().set_bit());
+
+    // Configure ADC
+    adc.cfgr1.modify(|_, w| unsafe {
+        w.cont().continuous();
+        w.exten().disabled();
+        w.extsel().bits(0);
+        w.align().right();
+        w.res().twelve_bit();
+        w.scandir().backward();
+        w
+    });
+
+    // Enable ADC channels and set sampling time
+    adc.chselr.modify(|_, w| {
+        w.chsel1().set_bit();
+        w.chsel2().set_bit();
+        w.chsel3().set_bit();
+        w.chsel6().set_bit();
+        w
+    });
+    adc.smpr.write(|w| w.smp().cycles239_5());
+
+    // Calibrate ADC
+    adc.cr.modify(|_, w| w.adcal().set_bit());
+    for _ in 0..0xf000 {
+        if adc.cr.read().adcal().bit_is_clear() { break }
+    }
+
+    // Enable ADC
+    adc.cr.modify(|_, w| w.aden().set_bit());
+    // Wait for ADC to be ready
+    while adc.isr.read().adrdy().bit_is_clear() {}
+
+    // Enable DMA requests
+    adc.cfgr1.modify(|_, w| w.dmaen().set_bit());
+
+    // Enable DMA interrupt
+    unsafe {
+        use stm32::Interrupt::DMA1_CH1;
+        nvic.set_priority(DMA1_CH1, 0);
+        NVIC::unmask(DMA1_CH1);
+    }
+}
+
 fn process_data(mut serial: impl Write) {
     if !ADC_DATA_READY.load(Ordering::SeqCst) {
         return;
@@ -80,12 +180,13 @@ fn process_data(mut serial: impl Write) {
 
 #[entry]
 fn main() -> ! {
-    let cp = cortex_m::Peripherals::take().unwrap();
+    let mut cp = cortex_m::Peripherals::take().unwrap();
     let dp = stm32::Peripherals::take().unwrap();
 
     let mut flash = dp.FLASH;
     let mut rcc = dp.RCC.configure().sysclk(8.mhz()).freeze(&mut flash);
 
+    let gpioa = dp.GPIOA.split(&mut rcc);
     let gpiob = dp.GPIOB.split(&mut rcc);
 
     // Configure USART
@@ -110,6 +211,13 @@ fn main() -> ! {
     let mut delay = Delay::new(cp.SYST, &rcc);
 
     writeln!(serial, "Hello, world!\r").unwrap();
+
+    let (_pa1, _pa2, _pa6) = cortex_m::interrupt::free(|cs| (
+        gpioa.pa1.into_analog(cs),
+        gpioa.pa2.into_analog(cs),
+        gpioa.pa6.into_analog(cs),
+    ));
+    setup_adc(dp.ADC, dp.DMA1, &mut cp.NVIC);
 
     loop {
         process_data(&mut serial);
