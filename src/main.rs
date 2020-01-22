@@ -38,31 +38,38 @@ fn DMA1_CH1() {
         // Clear TCIF flag
         dma.ifcr.write_with_zero(|w| w.ctcif1().set_bit());
 
-        let (light, temp, vref) = unsafe {
+        let data = unsafe {
             if ADC_DMA_BUF.len() > 4 {
                 let n = ADC_DMA_BUF.len() / 4;
-                let mut sum_light = 0;
-                let mut sum_temp = 0;
-                let mut sum_vref = 0;
+                let mut sum = [0u32; 4];
                 for i in 0..n {
-                    sum_light += (ADC_DMA_BUF[i*4+2]) as u32;
-                    sum_temp += (ADC_DMA_BUF[i*4]) as u32;
-                    sum_vref += (ADC_DMA_BUF[i*4+3]) as u32;
+                    sum[0] += (ADC_DMA_BUF[i * 4 + 0]) as u32;
+                    sum[1] += (ADC_DMA_BUF[i * 4 + 1]) as u32;
+                    sum[2] += (ADC_DMA_BUF[i * 4 + 2]) as u32;
+                    sum[3] += (ADC_DMA_BUF[i * 4 + 3]) as u32;
                 }
-                let avg_light = (sum_light / (n as u32)) as u16;
-                let avg_temp = (sum_temp / (n as u32)) as u16;
-                let avg_vref = (sum_vref / (n as u32)) as u16;
-                (avg_light, avg_temp, avg_vref)
+
+                [
+                    (sum[0] / (n as u32)) as u16,
+                    (sum[1] / (n as u32)) as u16,
+                    (sum[2] / (n as u32)) as u16,
+                    (sum[3] / (n as u32)) as u16,
+                ]
             } else {
-                (ADC_DMA_BUF[2], ADC_DMA_BUF[0], ADC_DMA_BUF[3])
+                [
+                    ADC_DMA_BUF[0],
+                    ADC_DMA_BUF[1],
+                    ADC_DMA_BUF[2],
+                    ADC_DMA_BUF[3],
+                ]
             }
         };
 
         let index = *INDEX;
         if index < ADC_ITEM_COUNT {
-            BUF_LIGHT[index] = light;
-            BUF_TEMP[index] = temp;
-            BUF_VREF[index] = vref;
+            BUF_LIGHT[index] = data[2];
+            BUF_TEMP[index] = data[0];
+            BUF_VREF[index] = data[3];
 
             if index == (ADC_ITEM_COUNT - 1) {
                 *INDEX = 0;
