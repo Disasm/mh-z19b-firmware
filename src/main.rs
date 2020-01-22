@@ -190,8 +190,26 @@ fn process_data(mut serial: impl Write) {
     };
     ADC_DATA_READY.store(false, Ordering::SeqCst);
 
+    write!(serial, "\r\n").ok();
+    write!(serial, "LIGHT:").ok();
+    for b in adc_light.iter() {
+        write!(serial, " {:02x}", *b).ok();
+    }
+    write!(serial, "\r\n").ok();
+
+    write!(serial, "TEMP: ").ok();
+    for b in adc_temp.iter() {
+        write!(serial, " {:02x}", *b).ok();
+    }
+    write!(serial, "\r\n").ok();
+
+    write!(serial, "VREF: ").ok();
+    for b in adc_vref.iter() {
+        write!(serial, " {:02x}", *b).ok();
+    }
+    write!(serial, "\r\n").ok();
+
     // TODO: process data
-    write!(serial, "ADC data: {} {} {}", adc_light[0], adc_temp[0], adc_vref[0]).unwrap();
 }
 
 #[entry]
