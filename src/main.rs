@@ -11,7 +11,7 @@ use cortex_m::peripheral::NVIC;
 use cortex_m_rt::entry;
 use core::fmt::Write;
 use stm32f0xx_hal::delay::Delay;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering, AtomicU32};
 
 const ADC_ITEM_COUNT: usize = 80;
 static mut ADC_DMA_BUF: [u16; 20] = [0; 20];
@@ -81,6 +81,42 @@ fn DMA1_CH1() {
             }
         }
     }
+}
+
+static TIM2_CNT: AtomicU32 = AtomicU32::new(0);
+
+#[interrupt]
+fn TIM2() {
+    static mut SAMPLE_TICK: usize = 0;
+
+    let tim = unsafe { &*stm32::TIM2::ptr() };
+    tim.sr.modify(|_, w| w.uif().clear_bit());
+
+    let mut tick = TIM2_CNT.load(Ordering::SeqCst);
+
+    let gpiob = unsafe { &*stm32::GPIOB::ptr() };
+    if tick == 100 {
+        gpiob.bsrr.write(|w| w.bs1().set_bit());
+    }
+    if tick == 500 {
+        gpiob.bsrr.write(|w| w.br1().set_bit());
+    }
+
+    if tick as usize == *SAMPLE_TICK * 10 && *SAMPLE_TICK < ADC_ITEM_COUNT {
+        let adc = unsafe { &*stm32::ADC::ptr() };
+
+        // Start conversion
+        adc.cr.modify(|_, w| w.adstart().set_bit());
+
+        *SAMPLE_TICK += 1;
+    }
+
+    tick += 1;
+    if tick == 4000 {
+        tick = 0;
+        *SAMPLE_TICK = 0;
+    }
+    TIM2_CNT.store(tick, Ordering::SeqCst);
 }
 
 fn setup_adc(adc: ADC, dma: DMA1, nvic: &mut NVIC) {
@@ -239,9 +275,6 @@ fn main() -> ! {
     });
     lamp_pin.set_low().unwrap();
 
-    let mut tim2 = Timer::tim2(dp.TIM2, 1.khz(), &mut rcc);
-    tim2.listen(Event::TimeOut);
-
     let mut delay = Delay::new(cp.SYST, &rcc);
 
     writeln!(serial, "Hello, world!\r").unwrap();
@@ -253,11 +286,11 @@ fn main() -> ! {
     ));
     setup_adc(dp.ADC, dp.DMA1, &mut cp.NVIC);
 
+    let mut tim2 = Timer::tim2(dp.TIM2, 1.khz(), &mut rcc);
+    tim2.listen(Event::TimeOut);
+    unsafe { NVIC::unmask(stm32::Interrupt::TIM2); }
+
     loop {
         process_data(&mut serial);
-        delay.delay_ms(3_000u32);
-        lamp_pin.set_high().unwrap();
-        delay.delay_ms(400u32);
-        lamp_pin.set_low().unwrap();
     }
 }
