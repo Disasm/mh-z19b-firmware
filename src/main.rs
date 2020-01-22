@@ -151,10 +151,10 @@ fn setup_adc(adc: ADC, dma: DMA1, nvic: &mut NVIC) {
 
     // Enable ADC channels and set sampling time
     adc.chselr.modify(|_, w| {
-        w.chsel1().set_bit();
-        w.chsel2().set_bit();
-        w.chsel3().set_bit();
-        w.chsel6().set_bit();
+        w.chsel1().set_bit(); // PA1 - Vref
+        w.chsel2().set_bit(); // PA2 - sensor (light)
+        w.chsel3().set_bit(); // NC
+        w.chsel6().set_bit(); // PA6 - sensor (temp)
         w
     });
     adc.smpr.write(|w| w.smp().cycles239_5());
