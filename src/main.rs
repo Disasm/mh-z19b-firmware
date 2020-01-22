@@ -14,7 +14,7 @@ use stm32f0xx_hal::delay::Delay;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const ADC_ITEM_COUNT: usize = 80;
-static mut ADC_DMA_BUF: [u16; 4] = [0; 4];
+static mut ADC_DMA_BUF: [u16; 20] = [0; 20];
 
 static mut ADC_LIGHT: [u16; ADC_ITEM_COUNT] = [0; ADC_ITEM_COUNT];
 static mut ADC_TEMP: [u16; ADC_ITEM_COUNT] = [0; ADC_ITEM_COUNT];
@@ -40,7 +40,23 @@ fn DMA1_CH1() {
         dma.ifcr.write_with_zero(|w| w.ctcif1().set_bit());
 
         let (light, temp, vref) = unsafe {
-            (ADC_DMA_BUF[2], ADC_DMA_BUF[0], ADC_DMA_BUF[3])
+            if ADC_DMA_BUF.len() > 4 {
+                let n = ADC_DMA_BUF.len() / 4;
+                let mut sum_light = 0;
+                let mut sum_temp = 0;
+                let mut sum_vref = 0;
+                for i in 0..n {
+                    sum_light += (ADC_DMA_BUF[i*4+2]) as u32;
+                    sum_temp += (ADC_DMA_BUF[i*4]) as u32;
+                    sum_vref += (ADC_DMA_BUF[i*4+3]) as u32;
+                }
+                let avg_light = (sum_light / (n as u32)) as u16;
+                let avg_temp = (sum_temp / (n as u32)) as u16;
+                let avg_vref = (sum_vref / (n as u32)) as u16;
+                (avg_light, avg_temp, avg_vref)
+            } else {
+                (ADC_DMA_BUF[2], ADC_DMA_BUF[0], ADC_DMA_BUF[3])
+            }
         };
 
         let index = *INDEX;
