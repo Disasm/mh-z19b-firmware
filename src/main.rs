@@ -10,7 +10,6 @@ use stm32f0xx_hal::timers::{Timer, Event};
 use cortex_m::peripheral::NVIC;
 use cortex_m_rt::entry;
 use core::fmt::Write;
-use stm32f0xx_hal::delay::Delay;
 use core::sync::atomic::{AtomicBool, Ordering, AtomicU32};
 
 const ADC_ITEM_COUNT: usize = 80;
@@ -274,8 +273,6 @@ fn main() -> ! {
         pb1.into_push_pull_output(cs)
     });
     lamp_pin.set_low().unwrap();
-
-    let mut delay = Delay::new(cp.SYST, &rcc);
 
     writeln!(serial, "Hello, world!\r").unwrap();
 
