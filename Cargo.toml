@@ -9,3 +9,6 @@ cortex-m = "0.6.2"
 cortex-m-rt = "0.6.11"
 panic-halt = "0.2.0"
 stm32f0xx-hal = { version = "0.15.2", features = ["rt", "stm32f051"] }
+
+[patch.crates-io]
+stm32f0xx-hal = { git = "https://github.com/stm32-rs/stm32f0xx-hal", rev = "06c983c84b7b558d89a0f54995c4cb177657bb9c" }
