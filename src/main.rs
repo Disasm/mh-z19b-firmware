@@ -20,6 +20,18 @@ static mut ADC_TEMP: [u16; ADC_ITEM_COUNT] = [0; ADC_ITEM_COUNT];
 static mut ADC_VREF: [u16; ADC_ITEM_COUNT] = [0; ADC_ITEM_COUNT];
 static ADC_DATA_READY: AtomicBool = AtomicBool::new(false);
 
+/// Start ADC conversion
+fn adc_start() {
+    let adc = unsafe { &*ADC::ptr() };
+    adc.cr.modify(|_, w| w.adstart().set_bit());
+}
+
+/// Stop ADC conversion
+fn adc_stop() {
+    let adc = unsafe { &*ADC::ptr() };
+    adc.cr.modify(|_, w| w.adstp().set_bit());
+}
+
 #[interrupt]
 fn DMA1_CH1() {
     // Warning: macro-magic happens here
@@ -29,11 +41,8 @@ fn DMA1_CH1() {
     static mut BUF_VREF: [u16; ADC_ITEM_COUNT] = [0; ADC_ITEM_COUNT];
 
     let dma = unsafe { &*DMA1::ptr() };
-    let adc = unsafe { &*ADC::ptr() };
-
     if dma.isr.read().tcif1().is_complete() {
-        // Stop conversion
-        adc.cr.modify(|_, w| w.adstp().set_bit());
+        adc_stop();
 
         // Clear TCIF flag
         unsafe { dma.ifcr.write_with_zero(|w| w.ctcif1().set_bit()) };
@@ -43,10 +52,10 @@ fn DMA1_CH1() {
                 let n = ADC_DMA_BUF.len() / 4;
                 let mut sum = [0u32; 4];
                 for i in 0..n {
-                    sum[0] += (ADC_DMA_BUF[i * 4 + 0]) as u32;
-                    sum[1] += (ADC_DMA_BUF[i * 4 + 1]) as u32;
-                    sum[2] += (ADC_DMA_BUF[i * 4 + 2]) as u32;
-                    sum[3] += (ADC_DMA_BUF[i * 4 + 3]) as u32;
+                    sum[0] += u32::from(ADC_DMA_BUF[i * 4]);
+                    sum[1] += u32::from(ADC_DMA_BUF[i * 4 + 1]);
+                    sum[2] += u32::from(ADC_DMA_BUF[i * 4 + 2]);
+                    sum[3] += u32::from(ADC_DMA_BUF[i * 4 + 3]);
                 }
 
                 [
@@ -109,11 +118,7 @@ fn TIM2() {
     }
 
     if tick as usize == *SAMPLE_TICK * 10 && *SAMPLE_TICK < ADC_ITEM_COUNT {
-        let adc = unsafe { &*stm32::ADC::ptr() };
-
-        // Start conversion
-        adc.cr.modify(|_, w| w.adstart().set_bit());
-
+        adc_start();
         *SAMPLE_TICK += 1;
     }
 
