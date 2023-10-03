@@ -36,7 +36,7 @@ fn DMA1_CH1() {
         adc.cr.modify(|_, w| w.adstp().set_bit());
 
         // Clear TCIF flag
-        dma.ifcr.write_with_zero(|w| w.ctcif1().set_bit());
+        unsafe { dma.ifcr.write_with_zero(|w| w.ctcif1().set_bit()) };
 
         let data = unsafe {
             if ADC_DMA_BUF.len() > 4 {
@@ -125,10 +125,10 @@ fn TIM2() {
     TIM2_CNT.store(tick, Ordering::SeqCst);
 }
 
-fn setup_adc(adc: ADC, dma: DMA1, nvic: &mut NVIC) {
+unsafe fn setup_adc(adc: ADC, dma: DMA1, nvic: &mut NVIC) {
     let rcc = unsafe { &*RCC::ptr() };
     rcc.apb2enr.modify(|_, w| w.adcen().set_bit());
-    rcc.ahbenr.modify(|_, w| w.dma1en().set_bit());
+    rcc.ahbenr.modify(|_, w| w.dmaen().set_bit());
 
     // Reset ADC
     rcc.apb2rstr.modify(|_, w| w.adcrst().set_bit());
@@ -288,7 +288,7 @@ fn main() -> ! {
         gpioa.pa2.into_analog(cs),
         gpioa.pa6.into_analog(cs),
     ));
-    setup_adc(dp.ADC, dp.DMA1, &mut cp.NVIC);
+    unsafe { setup_adc(dp.ADC, dp.DMA1, &mut cp.NVIC) };
 
     let mut tim2 = Timer::tim2(dp.TIM2, 1.khz(), &mut rcc);
     tim2.listen(Event::TimeOut);
